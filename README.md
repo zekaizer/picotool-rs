@@ -3,8 +3,9 @@
 Flash a UF2 onto an RP2040 over USB PICOBOOT — from a desktop host (macOS / Linux)
 or from a non-rooted Android tablet via Termux, with one shared codebase.
 
-> **Status: early.** Architecture decisions are recorded in [docs/adr](docs/adr/);
-> implementation has not started. Scope is flasher-first and RP2040-only — see
+> **Status: MVP.** The `load` command (UF2 → flash → reboot) is implemented and builds for
+> desktop hosts and Android (Termux); end-to-end flashing on hardware is a manual check (no
+> CI hardware). Scope is flasher-first and RP2040-only — see
 > [ADR 0001](docs/adr/0001-scope-flasher-first-rp2040-only.md).
 
 ## Usage
@@ -17,12 +18,14 @@ picotool-rs load firmware.uf2        # add --verify for read-back
 # macOS: no setup (PICOBOOT is a vendor interface)
 ```
 
-Android tablet (Termux) — `termux-usb` hands over the device fd via `-E`:
+Android tablet (Termux) — `termux-usb` runs the given command with the device path appended
+and, with `-E`, exports the fd as `$TERMUX_USB_FD`. picotool-rs reads that fd, so a one-line
+wrapper lets it ignore the trailing path:
 
 ```sh
-termux-usb -l                                          # find the device path
-UF2=firmware.uf2 termux-usb -r -E -e picotool-rs <device-path>
-# -E exports the fd as $TERMUX_USB_FD; approve the on-screen permission prompt
+termux-usb -l                                       # find the device path
+echo 'picotool-rs load firmware.uf2' > flash.sh
+termux-usb -r -E -e 'sh flash.sh' <device-path>     # approve the on-screen permission prompt
 ```
 
 ## Documentation
