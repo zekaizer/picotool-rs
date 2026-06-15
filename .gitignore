@@ -11,4 +11,13 @@
 CLAUDE.local.md
 .local/
 
+# .claude: ignore everything, then whitelist the shared files we track individually.
+# Anything not listed here (e.g. settings.local.json, session data) stays local.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/git-guard.sh
+!.claude/hooks/rust-postedit.sh
+
 # Cargo.lock is committed intentionally — picotool-rs ships a binary.
