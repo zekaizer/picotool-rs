@@ -13,6 +13,17 @@ non-rooted Android tablet (Termux). Start at [README.md](README.md) and
 - Use the canonical terms from [CONTEXT.md](CONTEXT.md) (BOOTSEL device, PICOBOOT, UF2,
   flash, load) in code and docs.
 
+## Workflow
+
+- Track features and fixes as GitHub issues (`gh issue create`). Open an issue before
+  starting non-trivial work, and reference it from the commits and PR.
+- New work lands on a feature branch and merges to `main` via PR — not direct commits to
+  `main` (initial scaffolding aside).
+- On a feature branch, build up logical atomic commits freely — no need to ask per commit.
+  Merges, pushes, and direct `main` commits need explicit confirmation.
+- Version bumps happen on `main` only, committed together with the updated `Cargo.lock` in
+  the same commit (keep version changes out of feature branches).
+
 ## Engineering constraints
 
 Decided (rationale in the linked ADR). Do not silently deviate; to change one, supersede
