@@ -9,5 +9,6 @@
 
 pub mod constants;
 pub mod device;
+pub mod load;
 pub mod picoboot;
 pub mod uf2;
