@@ -1,0 +1,15 @@
+[package]
+name = "picotool-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["Luke Lee <zekaizer@gmail.com>"]
+description = "Flash RP2040 UF2 over PICOBOOT from a desktop host or a non-rooted Android tablet (Termux)"
+repository = "https://github.com/zekaizer/picotool-rs"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"

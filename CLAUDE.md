@@ -44,6 +44,10 @@ the ADR rather than editing it.
   ([ADR 0002](docs/adr/0002-usb-access-via-nusb-and-termux-fd.md))
 - **Safety defaults** (convention, no ADR): family-id and flash-address guards are always
   on; read-back verify is opt-in (`--verify`).
+- **Errors:** core layers (picoboot / uf2 / device) return typed errors via `thiserror`;
+  the CLI binary uses `anyhow`.
+- **Logging:** use the `log` facade (not `println!`) for diagnostics; the binary
+  initializes `env_logger`, controlled by `RUST_LOG`.
 
 ## Testing
 
