@@ -8,5 +8,6 @@
 //! [ADR 0001]: https://github.com/zekaizer/picotool-rs/blob/main/docs/adr/0001-scope-flasher-first-rp2040-only.md
 
 pub mod constants;
+pub mod device;
 pub mod picoboot;
 pub mod uf2;
