@@ -1,0 +1,14 @@
+# Cargo build output
+/target
+
+# rustfmt backups
+**/*.rs.bk
+
+# macOS
+.DS_Store
+
+# Local-only files (not committed): personal notes and scratch
+CLAUDE.local.md
+.local/
+
+# Cargo.lock is committed intentionally — picotool-rs ships a binary.
