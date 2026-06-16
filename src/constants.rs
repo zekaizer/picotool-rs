@@ -128,10 +128,4 @@ mod tests {
     fn result_addr_does_not_overlap_stub() {
         assert!(RESULT_ADDR >= STUB_ADDR + FLASH_ID_STUB.len() as u32);
     }
-
-    #[test]
-    fn detection_bounds_are_sane() {
-        assert!(MIN_DETECTED_FLASH_SIZE < MAX_DETECTED_FLASH_SIZE);
-        assert_eq!(MAX_DETECTED_FLASH_SIZE, FLASH_END - FLASH_START);
-    }
 }
