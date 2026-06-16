@@ -23,6 +23,12 @@ non-rooted Android tablet (Termux). Start at [README.md](README.md) and
   Merging into `main` and pushing each require explicit user consent every time.
 - Version bumps happen on `main` only, committed together with the updated `Cargo.lock` in
   the same commit (keep version changes out of feature branches).
+- Quality gates live in `.githooks/` — enable once per clone with
+  `git config core.hooksPath .githooks`. Pre-commit (and pre-merge-commit, which git runs
+  instead for a `--no-ff` merge commit) runs `cargo fmt --check` + `test` (`test` already
+  compiles every target); pre-push runs the full CI set — `fmt --check`,
+  `clippy --all-targets -D warnings`, `test`, and `check --all-targets` for the Android
+  target — on `main` only. The `Edit`/`Write` hook just formats Rust files.
 
 ## Engineering constraints
 

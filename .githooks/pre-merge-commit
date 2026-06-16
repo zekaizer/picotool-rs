@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Pre-merge-commit gate: git runs THIS (not pre-commit) when a --no-ff merge creates a
+# commit, so a merge commit gets the same fmt + test gate as an ordinary commit.
+# (A --ff merge creates no commit and runs no hook; that history was already gated.)
+exec "$(dirname "$0")/pre-commit"
