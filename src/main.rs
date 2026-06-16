@@ -92,8 +92,6 @@ fn run_load(args: LoadArgs) -> Result<()> {
 
     let bytes = std::fs::read(&args.file)
         .with_context(|| format!("reading UF2 file {}", args.file.display()))?;
-    let segments =
-        uf2::parse(&bytes).with_context(|| format!("parsing UF2 file {}", args.file.display()))?;
 
     let fd = resolve_fd(args.fd);
     match fd {
@@ -101,6 +99,10 @@ fn run_load(args: LoadArgs) -> Result<()> {
         None => log::info!("opening BOOTSEL device by enumeration"),
     }
     let mut device = Device::open(fd, !args.any_device).context("opening BOOTSEL device")?;
+
+    let flash_end = resolve_flash_end(&mut device);
+    let segments = uf2::parse(&bytes, flash_end)
+        .with_context(|| format!("parsing UF2 file {}", args.file.display()))?;
 
     load::load(&mut device, &segments, args.verify).context("flashing UF2")?;
 
@@ -115,6 +117,30 @@ fn resolve_fd(flag: Option<RawFd>) -> Option<RawFd> {
             .ok()
             .and_then(|s| s.trim().parse().ok())
     })
+}
+
+/// Resolve the flash-address guard's upper bound: the runtime-detected flash size when the
+/// device reports a plausible JEDEC id, otherwise the conservative `FLASH_END`. Detection is
+/// best-effort and the guard stays on regardless, so a failed query or an implausible id
+/// only warns and falls back rather than refusing to flash.
+fn resolve_flash_end(device: &mut Device) -> u32 {
+    use picotool_rs::constants::{FLASH_END, FLASH_START};
+    match device.detect_flash_size() {
+        Ok(Some(size)) => {
+            log::info!("detected {size} bytes of flash");
+            FLASH_START + size
+        }
+        Ok(None) => {
+            log::warn!("flash id implausible; using conservative {FLASH_END:#010x} guard");
+            FLASH_END
+        }
+        Err(e) => {
+            log::warn!(
+                "flash-size detection failed ({e}); using conservative {FLASH_END:#010x} guard"
+            );
+            FLASH_END
+        }
+    }
 }
 
 /// The inner run's argument vector (program name + args), or `None` for a normal outer run.

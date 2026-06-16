@@ -11,7 +11,7 @@
 //! The 512-byte block layout follows the UF2 specification (see `docs/references.md`).
 
 use crate::constants::{
-    FLASH_END, FLASH_START, RP2040_FAMILY_ID, UF2_BLOCK_SIZE, UF2_FLAG_FAMILY_ID_PRESENT,
+    FLASH_START, RP2040_FAMILY_ID, UF2_BLOCK_SIZE, UF2_FLAG_FAMILY_ID_PRESENT,
     UF2_FLAG_NOT_MAIN_FLASH, UF2_MAGIC_END, UF2_MAGIC_START0, UF2_MAGIC_START1, UF2_MAX_PAYLOAD,
 };
 use thiserror::Error;
@@ -69,9 +69,9 @@ pub enum Uf2Error {
         block: usize,
     },
 
-    /// A block's target range falls outside the flash XIP window.
+    /// A block's target range falls outside the flash window (`[FLASH_START, flash_end)`).
     #[error(
-        "UF2 block {block} target {addr:#010x}+{size} is outside flash [{FLASH_START:#010x}, {FLASH_END:#010x})"
+        "UF2 block {block} target {addr:#010x}+{size} is outside flash [{FLASH_START:#010x}, {flash_end:#010x})"
     )]
     AddressOutOfRange {
         /// Zero-based block index.
@@ -80,6 +80,8 @@ pub enum Uf2Error {
         addr: u32,
         /// The block's payload size.
         size: u32,
+        /// The exclusive upper bound the block was checked against.
+        flash_end: u32,
     },
 
     /// Two accepted blocks overlap in their target addresses.
@@ -101,10 +103,14 @@ fn rd_u32(block: &[u8], off: usize) -> u32 {
 
 /// Parse a UF2 file into coalesced, address-ordered flash segments.
 ///
+/// `flash_end` is the exclusive upper bound of the flash window every accepted block must
+/// fall within; callers pass the runtime-detected flash size, or a conservative bound when
+/// detection is unavailable.
+///
 /// Blocks flagged not-main-flash and blocks tagged with a non-RP2040 family id are
 /// skipped. Returns an error if the file is malformed, a block is out of range or
 /// untagged, accepted blocks overlap, or nothing flashable remains.
-pub fn parse(bytes: &[u8]) -> Result<Vec<Segment>, Uf2Error> {
+pub fn parse(bytes: &[u8], flash_end: u32) -> Result<Vec<Segment>, Uf2Error> {
     if bytes.is_empty() {
         return Err(Uf2Error::Empty);
     }
@@ -144,8 +150,13 @@ pub fn parse(bytes: &[u8]) -> Result<Vec<Segment>, Uf2Error> {
 
         // flash-address guard: the whole payload must land inside the flash window.
         let end = u64::from(addr) + u64::from(size);
-        if addr < FLASH_START || end > u64::from(FLASH_END) {
-            return Err(Uf2Error::AddressOutOfRange { block, addr, size });
+        if addr < FLASH_START || end > u64::from(flash_end) {
+            return Err(Uf2Error::AddressOutOfRange {
+                block,
+                addr,
+                size,
+                flash_end,
+            });
         }
 
         let payload = &chunk[32..32 + size as usize];
@@ -180,6 +191,7 @@ fn append_block(segments: &mut Vec<Segment>, addr: u32, payload: &[u8]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::FLASH_END;
 
     /// Build one 512-byte UF2 block from spec-derived field values.
     fn block(flags: u32, addr: u32, family: u32, payload: &[u8]) -> Vec<u8> {
@@ -204,7 +216,7 @@ mod tests {
     #[test]
     fn single_block_yields_one_segment() {
         let b = block(FAM, FLASH_START, RP2040, &[1, 2, 3, 4]);
-        let segs = parse(&b).unwrap();
+        let segs = parse(&b, FLASH_END).unwrap();
         assert_eq!(
             segs,
             vec![Segment {
@@ -218,7 +230,7 @@ mod tests {
     fn contiguous_blocks_coalesce() {
         let mut f = block(FAM, FLASH_START, RP2040, &[0xAA; 256]);
         f.extend(block(FAM, FLASH_START + 256, RP2040, &[0xBB; 256]));
-        let segs = parse(&f).unwrap();
+        let segs = parse(&f, FLASH_END).unwrap();
         assert_eq!(segs.len(), 1);
         assert_eq!(segs[0].addr, FLASH_START);
         assert_eq!(segs[0].data.len(), 512);
@@ -230,7 +242,7 @@ mod tests {
     fn gap_splits_into_two_segments() {
         let mut f = block(FAM, FLASH_START, RP2040, &[1; 256]);
         f.extend(block(FAM, FLASH_START + 0x1000, RP2040, &[2; 256]));
-        let segs = parse(&f).unwrap();
+        let segs = parse(&f, FLASH_END).unwrap();
         assert_eq!(segs.len(), 2);
         assert_eq!(segs[1].addr, FLASH_START + 0x1000);
     }
@@ -239,7 +251,7 @@ mod tests {
     fn not_main_flash_block_is_skipped() {
         let mut f = block(FAM | UF2_FLAG_NOT_MAIN_FLASH, FLASH_START, RP2040, &[9; 4]);
         f.extend(block(FAM, FLASH_START, RP2040, &[1, 2, 3, 4]));
-        let segs = parse(&f).unwrap();
+        let segs = parse(&f, FLASH_END).unwrap();
         assert_eq!(
             segs,
             vec![Segment {
@@ -253,7 +265,7 @@ mod tests {
     fn foreign_family_block_is_skipped() {
         let mut f = block(FAM, FLASH_START, 0x1122_3344, &[9; 4]);
         f.extend(block(FAM, FLASH_START + 0x2000, RP2040, &[5, 6]));
-        let segs = parse(&f).unwrap();
+        let segs = parse(&f, FLASH_END).unwrap();
         assert_eq!(
             segs,
             vec![Segment {
@@ -266,43 +278,72 @@ mod tests {
     #[test]
     fn missing_family_id_is_rejected() {
         let b = block(0, FLASH_START, 0, &[1, 2, 3, 4]);
-        assert_eq!(parse(&b), Err(Uf2Error::MissingFamilyId { block: 0 }));
+        assert_eq!(
+            parse(&b, FLASH_END),
+            Err(Uf2Error::MissingFamilyId { block: 0 })
+        );
     }
 
     #[test]
     fn address_below_flash_is_rejected() {
         let b = block(FAM, FLASH_START - 4, RP2040, &[1, 2, 3, 4]);
-        assert!(matches!(parse(&b), Err(Uf2Error::AddressOutOfRange { .. })));
+        assert!(matches!(
+            parse(&b, FLASH_END),
+            Err(Uf2Error::AddressOutOfRange { .. })
+        ));
     }
 
     #[test]
     fn bad_magic_is_rejected() {
         let mut b = block(FAM, FLASH_START, RP2040, &[1, 2, 3, 4]);
         b[0] ^= 0xFF;
-        assert_eq!(parse(&b), Err(Uf2Error::BadMagic { block: 0 }));
+        assert_eq!(parse(&b, FLASH_END), Err(Uf2Error::BadMagic { block: 0 }));
     }
 
     #[test]
     fn non_block_aligned_length_is_rejected() {
         let b = vec![0u8; 100];
-        assert_eq!(parse(&b), Err(Uf2Error::Truncated { len: 100 }));
+        assert_eq!(parse(&b, FLASH_END), Err(Uf2Error::Truncated { len: 100 }));
     }
 
     #[test]
     fn empty_input_is_rejected() {
-        assert_eq!(parse(&[]), Err(Uf2Error::Empty));
+        assert_eq!(parse(&[], FLASH_END), Err(Uf2Error::Empty));
     }
 
     #[test]
     fn only_foreign_blocks_yields_no_flash_data() {
         let b = block(FAM, FLASH_START, 0x1122_3344, &[9; 4]);
-        assert_eq!(parse(&b), Err(Uf2Error::NoFlashData));
+        assert_eq!(parse(&b, FLASH_END), Err(Uf2Error::NoFlashData));
     }
 
     #[test]
     fn overlapping_blocks_are_rejected() {
         let mut f = block(FAM, FLASH_START + 256, RP2040, &[1; 256]);
         f.extend(block(FAM, FLASH_START, RP2040, &[2; 256]));
-        assert!(matches!(parse(&f), Err(Uf2Error::Overlap { .. })));
+        assert!(matches!(
+            parse(&f, FLASH_END),
+            Err(Uf2Error::Overlap { .. })
+        ));
+    }
+
+    #[test]
+    fn block_past_detected_flash_end_is_rejected() {
+        // With a 2 MiB flash_end, a block whose payload spills past it is refused even
+        // though it sits well within the conservative 16 MiB window.
+        let two_mib = FLASH_START + 2 * 1024 * 1024;
+        let b = block(FAM, two_mib - 4, RP2040, &[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert!(matches!(
+            parse(&b, two_mib),
+            Err(Uf2Error::AddressOutOfRange { flash_end, .. }) if flash_end == two_mib
+        ));
+    }
+
+    #[test]
+    fn block_ending_exactly_at_flash_end_is_accepted() {
+        let two_mib = FLASH_START + 2 * 1024 * 1024;
+        let b = block(FAM, two_mib - 4, RP2040, &[1, 2, 3, 4]);
+        let segs = parse(&b, two_mib).unwrap();
+        assert_eq!(segs[0].end(), two_mib);
     }
 }

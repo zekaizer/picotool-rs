@@ -75,3 +75,57 @@ pub const PICOBOOT_MAGIC: u32 = 0x431F_D10B;
 /// Vendor control request (host-to-interface) that resets the PICOBOOT interface,
 /// clearing any half-finished command and stalled endpoint state.
 pub const PICOBOOT_IF_RESET: u8 = 0x41;
+
+// ---- Flash-size detection (PICOBOOT EXEC stub) ----
+
+/// SRAM address the flash-id stub is written to and executed from.
+///
+/// The RP2040 USB bootrom does not document which SRAM it touches while servicing PICOBOOT,
+/// so no address is provably free. Main-SRAM base is the conservative choice: the bootrom
+/// loads and runs RAM-only UF2 images from the lowest main-SRAM address (datasheet §2.8,
+/// erratum RP2040-E9), so it must leave this region available for downloaded code. The
+/// choice is verified on real hardware (#3).
+pub const STUB_ADDR: u32 = 0x2000_0000;
+
+/// SRAM address the stub writes the three JEDEC id bytes to (manufacturer, type, capacity),
+/// placed past the stub body so code and result never overlap.
+pub const RESULT_ADDR: u32 = 0x2000_0080;
+
+/// Clean-room thumb (ARMv6-M) machine code that reads the flash JEDEC ID (RDID, `0x9F`) over
+/// XIP_SSI and stores the three id bytes at [`RESULT_ADDR`]. Run via PICOBOOT EXEC: it takes
+/// no arguments and returns nothing, communicating only through RAM (datasheet §2.8.5.4.8).
+///
+/// It drives the Synopsys SSI directly (XIP_SSI base `0x1800_0000`, datasheet §4.10.12):
+/// disable, set CTRLR0 to 8-bit standard-SPI transmit-and-receive, enable, select slave 0,
+/// push the opcode plus three dummy bytes, spin until `RXFLR == 4`, then read the four
+/// frames (the first is the opcode echo, discarded). The assembly source and this byte
+/// vector's disassembly are reproduced in [ADR 0005].
+///
+/// [ADR 0005]: ../../docs/adr/0005-runtime-flash-size-detection.md
+#[rustfmt::skip]
+pub const FLASH_ID_STUB: [u8; 62] = [
+    0x10, 0xb5, 0x18, 0x20, 0x00, 0x06, 0x00, 0x21, 0x81, 0x60, 0x07, 0x22,
+    0x12, 0x04, 0x02, 0x60, 0x41, 0x60, 0x01, 0x22, 0x82, 0x60, 0x02, 0x61,
+    0x9f, 0x22, 0x02, 0x66, 0x01, 0x66, 0x01, 0x66, 0x01, 0x66, 0x42, 0x6a,
+    0x04, 0x2a, 0xfc, 0xd3, 0x20, 0x24, 0x24, 0x06, 0x80, 0x34, 0x02, 0x6e,
+    0x02, 0x6e, 0x22, 0x70, 0x02, 0x6e, 0x62, 0x70, 0x02, 0x6e, 0xa2, 0x70,
+    0x10, 0xbd,
+];
+
+/// Smallest flash size accepted from runtime detection; a JEDEC capacity decoding to less is
+/// treated as a bogus read, and detection falls back to the conservative window.
+pub const MIN_DETECTED_FLASH_SIZE: u32 = 64 * 1024;
+
+/// Largest flash size accepted from runtime detection: the XIP-addressable maximum,
+/// `FLASH_END - FLASH_START`.
+pub const MAX_DETECTED_FLASH_SIZE: u32 = FLASH_END - FLASH_START;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_addr_does_not_overlap_stub() {
+        assert!(RESULT_ADDR >= STUB_ADDR + FLASH_ID_STUB.len() as u32);
+    }
+}

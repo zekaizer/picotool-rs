@@ -24,7 +24,11 @@ use nusb::transfer::{
 };
 use thiserror::Error;
 
-use crate::constants::{PICOBOOT_IF_RESET, PICOBOOT_INTERFACE_CLASS, PRODUCT_ID, VENDOR_ID};
+use crate::constants::{
+    FLASH_ID_STUB, PICOBOOT_IF_RESET, PICOBOOT_INTERFACE_CLASS, PRODUCT_ID, RESULT_ADDR, STUB_ADDR,
+    VENDOR_ID,
+};
+use crate::detect::flash_size_from_jedec;
 use crate::picoboot::{Command, Exclusivity};
 
 /// Timeout for a command packet, data chunk, or acknowledgement.
@@ -237,6 +241,28 @@ impl Device {
     /// Re-enter command XIP so flash can be read back.
     pub fn enter_cmd_xip(&mut self) -> Result<(), DeviceError> {
         self.exec_no_data(Command::EnterCmdXip, "enter cmd xip", COMMAND_TIMEOUT)
+    }
+
+    /// Execute a function previously written to RAM (PICOBOOT EXEC). The device adds the
+    /// thumb bit; the function takes no arguments and communicates only via RAM.
+    pub fn exec(&mut self, addr: u32) -> Result<(), DeviceError> {
+        self.exec_no_data(Command::Exec { addr }, "exec", COMMAND_TIMEOUT)
+    }
+
+    /// Detect the attached flash size by reading its JEDEC ID on the device.
+    ///
+    /// Takes exclusive access, exits XIP, writes the flash-id stub into SRAM with a WRITE,
+    /// runs it via EXEC, and reads back the three JEDEC id bytes (see [`crate::detect`]).
+    /// Returns the decoded size, or `None` when the id is implausible (absent or
+    /// unresponsive flash) so the caller can fall back to a conservative bound. The stub
+    /// only reads flash, so a subsequent `load` re-runs `exit_xip` from a clean SSI state.
+    pub fn detect_flash_size(&mut self) -> Result<Option<u32>, DeviceError> {
+        self.exclusive_access(Exclusivity::Exclusive)?;
+        self.exit_xip()?;
+        self.flash_write(STUB_ADDR, &FLASH_ID_STUB)?;
+        self.exec(STUB_ADDR)?;
+        let id = self.flash_read(RESULT_ADDR, 3)?;
+        Ok(flash_size_from_jedec([id[0], id[1], id[2]]))
     }
 
     /// Erase a flash region. `addr` and `size` must be sector-aligned.

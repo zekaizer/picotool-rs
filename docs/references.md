@@ -22,6 +22,10 @@ behavioral oracle for golden test vectors.
     interface / endpoint identity (§2.8.5.1–.3 — VID `0x2E8A` PID `0x0003`,
     `bInterfaceClass 0xFF`, one bulk OUT/IN pair), the 32-byte command packet and command set
     (§2.8.5.4, Table 174 — encoded in `src/picoboot.rs`), and the control requests (§2.8.5.5).
+  - **§2.8.5.4.8 "EXEC", §2.8.1.2 "Flash Boot Sequence", and §4.10 "SSI"** (register map at
+    §4.10.12) — the basis for runtime flash-size detection: the EXEC stub in
+    `src/constants.rs` drives the SSI to read the flash JEDEC id (RDID `0x9F`). See
+    [ADR 0005](adr/0005-runtime-flash-size-detection.md).
 
 > **Naming / errata note.** The datasheet names the interface-reset control request
 > INTERFACE_RESET (`0x41`, §2.8.5.5.1, Table 184); this is what `constants::PICOBOOT_IF_RESET`
