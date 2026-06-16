@@ -28,6 +28,7 @@ const CMD_READ: u8 = 0x84;
 const CMD_WRITE: u8 = 0x05;
 const CMD_EXIT_XIP: u8 = 0x06;
 const CMD_ENTER_CMD_XIP: u8 = 0x07;
+const CMD_EXEC: u8 = 0x08;
 
 /// Exclusivity level for [`Command::ExclusiveAccess`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +62,12 @@ pub enum Command {
     ExitXip,
     /// Re-enter command-based XIP so flash can be read back.
     EnterCmdXip,
+    /// Execute a function previously written to RAM. The function takes no arguments and
+    /// returns no results, so it communicates via RAM (RP2040 datasheet §2.8.5.4.8).
+    Exec {
+        /// Address of the function to execute (the device adds the thumb bit).
+        addr: u32,
+    },
     /// Erase a flash region; `addr` and `size` must be sector-aligned.
     FlashErase {
         /// Flash start address.
@@ -100,6 +107,7 @@ impl Command {
             Command::ExclusiveAccess(_) => CMD_EXCLUSIVE_ACCESS,
             Command::ExitXip => CMD_EXIT_XIP,
             Command::EnterCmdXip => CMD_ENTER_CMD_XIP,
+            Command::Exec { .. } => CMD_EXEC,
             Command::FlashErase { .. } => CMD_FLASH_ERASE,
             Command::Write { .. } => CMD_WRITE,
             Command::Read { .. } => CMD_READ,
@@ -112,6 +120,7 @@ impl Command {
         match self {
             Command::ExclusiveAccess(_) => 1,
             Command::ExitXip | Command::EnterCmdXip => 0,
+            Command::Exec { .. } => 4,
             Command::FlashErase { .. } | Command::Write { .. } | Command::Read { .. } => 8,
             Command::Reboot { .. } => 12,
         }
@@ -138,6 +147,7 @@ impl Command {
     fn write_args(&self, args: &mut [u8]) {
         match *self {
             Command::ExclusiveAccess(level) => args[0] = level as u8,
+            Command::Exec { addr } => args[0..4].copy_from_slice(&addr.to_le_bytes()),
             Command::FlashErase { addr, size }
             | Command::Write { addr, size }
             | Command::Read { addr, size } => {
@@ -288,6 +298,23 @@ mod tests {
             delay_ms: 500,
         };
         assert_eq!(cmd.encode(0), expected);
+    }
+
+    #[test]
+    fn exec_golden() {
+        #[rustfmt::skip]
+        let expected = [
+            0x0B, 0xD1, 0x1F, 0x43, // magic
+            0x00, 0x00, 0x00, 0x00, // token
+            0x08, 0x04, 0x00, 0x00, // cmd_id=EXEC, cmd_size=4, reserved
+            0x00, 0x00, 0x00, 0x00, // transfer_length=0
+            0x00, 0x00, 0x00, 0x20, // addr=0x20000000
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let cmd = Command::Exec { addr: 0x2000_0000 };
+        assert_eq!(cmd.encode(0), expected);
+        assert_eq!(cmd.data_phase(), DataPhase::None);
     }
 
     #[test]
