@@ -16,11 +16,11 @@ non-rooted Android tablet (Termux). Start at [README.md](README.md) and
 ## Workflow
 
 - Track features and fixes as GitHub issues (`gh issue create`). Open an issue before
-  starting non-trivial work, and reference it from the commits and PR.
-- New work lands on a feature branch and merges to `main` via PR — not direct commits to
-  `main` (initial scaffolding aside).
+  starting non-trivial work, and reference it from the commits.
+- New work lands on a feature branch and is merged directly into `main` (solo project — no
+  PR); develop on the branch rather than committing straight onto `main`.
 - On a feature branch, build up logical atomic commits freely — no need to ask per commit.
-  Merges, pushes, and direct `main` commits need explicit confirmation.
+  Merging into `main` and pushing each require explicit user consent every time.
 - Version bumps happen on `main` only, committed together with the updated `Cargo.lock` in
   the same commit (keep version changes out of feature branches).
 
