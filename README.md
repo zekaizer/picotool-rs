@@ -18,15 +18,18 @@ picotool-rs load firmware.uf2        # add --verify for read-back
 # macOS: no setup (PICOBOOT is a vendor interface)
 ```
 
-Android tablet (Termux) — `termux-usb` runs the given command with the device path appended
-and, with `-E`, exports the fd as `$TERMUX_USB_FD`. picotool-rs reads that fd, so a one-line
-wrapper lets it ignore the trailing path:
+Android tablet (Termux) — pass the device path with `--device`; picotool-rs re-executes
+itself through `termux-usb` to obtain the descriptor, so it is one command rather than a
+wrapper script ([ADR 0004](docs/adr/0004-termux-device-self-reexec.md)):
 
 ```sh
-termux-usb -l                                       # find the device path
-echo 'picotool-rs load firmware.uf2' > flash.sh
-termux-usb -r -E -e 'sh flash.sh' <device-path>     # approve the on-screen permission prompt
+termux-usb -l                                                  # find the device path
+picotool-rs load firmware.uf2 --device <device-path>          # approve the on-screen prompt
 ```
+
+The opened device's VID/PID is checked against the RP2040 BOOTSEL identity before flashing;
+pass `--any-device` to override. Advanced: `--fd <n>` / `$TERMUX_USB_FD` accept a descriptor
+directly if you are driving `termux-usb` yourself.
 
 ## Documentation
 
