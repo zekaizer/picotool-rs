@@ -24,9 +24,7 @@ use nusb::transfer::{
 };
 use thiserror::Error;
 
-use crate::constants::{PICOBOOT_IF_RESET, PICOBOOT_INTERFACE_CLASS};
-#[cfg(not(target_os = "android"))]
-use crate::constants::{PRODUCT_ID, VENDOR_ID};
+use crate::constants::{PICOBOOT_IF_RESET, PICOBOOT_INTERFACE_CLASS, PRODUCT_ID, VENDOR_ID};
 use crate::picoboot::{Command, Exclusivity};
 
 /// Timeout for a command packet, data chunk, or acknowledgement.
@@ -61,6 +59,17 @@ pub enum DeviceError {
     /// VID/PID enumeration is unavailable (non-rooted Android); a descriptor must be supplied.
     #[error("device enumeration is unavailable on this platform; supply --fd or $TERMUX_USB_FD")]
     EnumerateUnsupported,
+
+    /// The opened device is not the RP2040 BOOTSEL device (identity guard).
+    #[error(
+        "device {vid:#06x}:{pid:#06x} is not the RP2040 BOOTSEL device; pass --any-device to flash it anyway"
+    )]
+    WrongDevice {
+        /// The vendor id read from the opened device.
+        vid: u16,
+        /// The product id read from the opened device.
+        pid: u16,
+    },
 
     /// The device's active configuration could not be read.
     #[error("cannot read active configuration: {0}")]
@@ -106,11 +115,13 @@ impl Device {
     /// Open the device, dispatching at runtime on whether a descriptor was supplied (ADR 0002).
     ///
     /// With `fd`, wrap that descriptor — the only route on non-rooted Android. Without it,
-    /// enumerate by VID/PID, as on desktop hosts.
-    pub fn open(fd: Option<RawFd>) -> Result<Device, DeviceError> {
+    /// enumerate by VID/PID, as on desktop hosts. When `verify_id` is set, the opened device's
+    /// VID/PID must match the RP2040 BOOTSEL identity or [`DeviceError::WrongDevice`] is
+    /// returned; the descriptor path otherwise performs no identity check (ADR 0004).
+    pub fn open(fd: Option<RawFd>, verify_id: bool) -> Result<Device, DeviceError> {
         match fd {
-            Some(fd) => Device::open_fd(fd),
-            None => Device::open_enumerate(),
+            Some(fd) => Device::open_fd(fd, verify_id),
+            None => Device::open_enumerate(verify_id),
         }
     }
 
@@ -120,7 +131,7 @@ impl Device {
     /// Android build returns [`DeviceError::EnumerateUnsupported`] and must use [`open_fd`].
     ///
     /// [`open_fd`]: Device::open_fd
-    pub fn open_enumerate() -> Result<Device, DeviceError> {
+    pub fn open_enumerate(verify_id: bool) -> Result<Device, DeviceError> {
         #[cfg(not(target_os = "android"))]
         {
             let info = nusb::list_devices()
@@ -131,10 +142,11 @@ impl Device {
                     pid: PRODUCT_ID,
                 })?;
             let device = info.open().wait()?;
-            Device::from_nusb(device)
+            Device::from_nusb(device, verify_id)
         }
         #[cfg(target_os = "android")]
         {
+            let _ = verify_id;
             Err(DeviceError::EnumerateUnsupported)
         }
     }
@@ -143,22 +155,32 @@ impl Device {
     ///
     /// Ownership of `fd` transfers to the returned device. Supported on Linux/Android only.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    pub fn open_fd(fd: RawFd) -> Result<Device, DeviceError> {
+    pub fn open_fd(fd: RawFd, verify_id: bool) -> Result<Device, DeviceError> {
         // SAFETY: the caller (termux-usb -E via $TERMUX_USB_FD, or --fd) hands over an open
         // usbfs descriptor whose ownership we take for the device's lifetime.
         let owned = unsafe { OwnedFd::from_raw_fd(fd) };
         let device = nusb::Device::from_fd(owned).wait()?;
-        Device::from_nusb(device)
+        Device::from_nusb(device, verify_id)
     }
 
     /// Stub on platforms without `from_fd`; always returns [`DeviceError::FdUnsupported`].
     #[cfg(not(any(target_os = "android", target_os = "linux")))]
-    pub fn open_fd(_fd: RawFd) -> Result<Device, DeviceError> {
+    pub fn open_fd(_fd: RawFd, _verify_id: bool) -> Result<Device, DeviceError> {
         Err(DeviceError::FdUnsupported)
     }
 
     /// Claim the PICOBOOT interface, open its bulk endpoints, and reset it to a clean state.
-    fn from_nusb(device: nusb::Device) -> Result<Device, DeviceError> {
+    ///
+    /// When `verify_id` is set, refuse a device whose VID/PID is not the RP2040 BOOTSEL
+    /// identity before touching flash; the `--any-device` opt-out clears it (ADR 0004).
+    fn from_nusb(device: nusb::Device, verify_id: bool) -> Result<Device, DeviceError> {
+        if verify_id {
+            let desc = device.device_descriptor();
+            let (vid, pid) = (desc.vendor_id(), desc.product_id());
+            if vid != VENDOR_ID || pid != PRODUCT_ID {
+                return Err(DeviceError::WrongDevice { vid, pid });
+            }
+        }
         let (if_num, out_addr, in_addr) = find_picoboot(&device)?;
         let interface = device.claim_interface(if_num).wait()?;
         let ep_out = interface.endpoint::<Bulk, Out>(out_addr)?;

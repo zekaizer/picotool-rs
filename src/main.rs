@@ -38,6 +38,10 @@ struct LoadArgs {
     #[arg(long)]
     verify: bool,
 
+    /// Flash the opened device even if its VID/PID is not the RP2040 BOOTSEL identity.
+    #[arg(long)]
+    any_device: bool,
+
     /// Open this already-open USB file descriptor instead of enumerating (Linux/Android).
     ///
     /// Falls back to `$TERMUX_USB_FD` when not given.
@@ -65,7 +69,7 @@ fn run_load(args: LoadArgs) -> Result<()> {
         Some(fd) => log::info!("opening BOOTSEL device via fd {fd}"),
         None => log::info!("opening BOOTSEL device by enumeration"),
     }
-    let mut device = Device::open(fd).context("opening BOOTSEL device")?;
+    let mut device = Device::open(fd, !args.any_device).context("opening BOOTSEL device")?;
 
     load::load(&mut device, &segments, args.verify).context("flashing UF2")?;
 
