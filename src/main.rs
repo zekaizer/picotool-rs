@@ -92,8 +92,8 @@ fn run_load(args: LoadArgs) -> Result<()> {
 
     let bytes = std::fs::read(&args.file)
         .with_context(|| format!("reading UF2 file {}", args.file.display()))?;
-    let segments =
-        uf2::parse(&bytes).with_context(|| format!("parsing UF2 file {}", args.file.display()))?;
+    let segments = uf2::parse(&bytes, picotool_rs::constants::FLASH_END)
+        .with_context(|| format!("parsing UF2 file {}", args.file.display()))?;
 
     let fd = resolve_fd(args.fd);
     match fd {
